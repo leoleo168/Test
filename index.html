@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>溜溜球物理模擬器 - Yo-Yo Simulator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      user-select: none;
+      overflow: hidden;
+    }
+    canvas {
+      touch-action: none;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen w-screen flex flex-col font-sans">
+  
+  <!-- 頂部標題與狀態 -->
+  <header class="bg-slate-800/80 backdrop-blur border-b border-slate-700 px-6 py-3 flex justify-between items-center z-10">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-rose-500 to-amber-400 flex items-center justify-center font-bold text-white shadow-lg shadow-rose-500/30">
+        🪀
+      </div>
+      <h1 class="font-bold text-lg tracking-wide text-white">Yo-Yo 物理模擬器</h1>
+    </div>
+    <div class="flex items-center gap-6 text-sm">
+      <div class="bg-slate-700/60 px-3 py-1.5 rounded-lg border border-slate-600/50">
+        狀態：<span id="state-text" class="font-semibold text-amber-400">手中 (Ready)</span>
+      </div>
+      <div class="bg-slate-700/60 px-3 py-1.5 rounded-lg border border-slate-600/50">
+        轉速 (RPM)：<span id="rpm-text" class="font-mono text-cyan-400">0</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主遊戲畫面 -->
+  <div class="relative flex-1 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-950 flex items-center justify-center">
+    <canvas id="sim-canvas" class="w-full h-full block"></canvas>
+
+    <!-- 操作浮動提示 -->
+    <div class="absolute top-4 left-4 pointer-events-none bg-slate-900/70 border border-slate-700/70 backdrop-blur p-4 rounded-xl text-xs space-y-1.5 text-slate-300">
+      <p class="font-bold text-slate-200 text-sm mb-1">🎮 操作指南</p>
+      <p>• <kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-slate-100">空白鍵 Space</kbd> 或點擊按鈕：甩出溜溜球 (Throw)</p>
+      <p>• <kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-slate-100">W / 向上鍵</kbd> 或點擊收球：拉扯收回 (Tug Return)</p>
+      <p>• <kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-slate-100">A / D</kbd> 或滑鼠左右拖動手部：擺動與搖晃</p>
+      <p>• <kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-slate-100">R</kbd>：重置溜溜球到手中</p>
+    </div>
+
+    <!-- 快速動作控制欄 (行動端 / 滑鼠點擊便利) -->
+    <div class="absolute bottom-6 flex gap-3 z-10">
+      <button id="btn-throw" class="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 active:scale-95 transition font-semibold rounded-xl shadow-lg shadow-rose-600/30">
+        甩出 (Throw)
+      </button>
+      <button id="btn-return" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-95 transition font-semibold rounded-xl shadow-lg shadow-indigo-600/30">
+        輕扯收回 (Tug)
+      </button>
+      <button id="btn-cradle" class="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 active:scale-95 transition font-semibold rounded-xl shadow-lg shadow-amber-600/30">
+        特技：走狗 (Walk Dog)
+      </button>
+      <button id="btn-reset" class="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 active:scale-95 transition font-medium rounded-xl border border-slate-600">
+        重置 (Reset)
+      </button>
+    </div>
+  </div>
+
+  <!-- 參數微調懸浮窗 -->
+  <aside class="absolute right-4 top-20 bg-slate-900/85 backdrop-blur border border-slate-700 p-4 rounded-xl w-72 text-sm shadow-2xl z-20">
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="font-bold text-slate-200">溜溜球參數設定</h2>
+    </div>
+    <div class="space-y-4">
+      <div>
+        <div class="flex justify-between text-xs text-slate-400 mb-1">
+          <span>軸承摩擦力 (培林品質)</span>
+          <span id="val-friction">低阻力</span>
+        </div>
+        <input type="range" id="param-friction" min="0.0005" max="0.008" step="0.0005" value="0.0015" class="w-full accent-rose-500">
+      </div>
+      <div>
+        <div class="flex justify-between text-xs text-slate-400 mb-1">
+          <span>甩球力度</span>
+          <span id="val-force">強勁</span>
+        </div>
+        <input type="range" id="param-force" min="15" max="45" step="1" value="30" class="w-full accent-indigo-500">
+      </div>
+      <div>
+        <div class="flex justify-between text-xs text-slate-400 mb-1">
+          <span>繩長 (cm)</span>
+          <span id="val-length">90</span>
+        </div>
+        <input type="range" id="param-length" min="50" max="130" step="5" value="90" class="w-full accent-emerald-500">
+      </div>
+      <div>
+        <label class="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
+          <input type="checkbox" id="param-responsive" class="rounded accent-rose-500">
+          <span>超靈敏模式 (Responsive, 容易收回)</span>
+        </label>
+      </div>
+    </div>
+  </aside>
+
+  <script>
+    const canvas = document.getElementById('sim-canvas');
+    const ctx = canvas.getContext('2d');
+
+    // 視窗自適應
+    function resizeCanvas() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // UI 元素
+    const stateText = document.getElementById('state-text');
+    const rpmText = document.getElementById('rpm-text');
+    const frictionInput = document.getElementById('param-friction');
+    const forceInput = document.getElementById('param-force');
+    const lengthInput = document.getElementById('param-length');
+    const responsiveInput = document.getElementById('param-responsive');
+
+    // 物理參數
+    const GRAVITY = 0.45;
+    let maxStringLength = 320; // 繩長像素
+    let friction = 0.0015;
+    let throwPower = 30;
+    let isResponsive = false;
+
+    // 狀態枚舉: 'HAND', 'UNWINDING', 'SLEEPING', 'WINDING_UP'
+    let state = 'HAND';
+
+    // 溜溜球本體狀態
+    const hand = {
+      x: canvas.width / 2,
+      y: 120,
+      vx: 0,
+      targetX: canvas.width / 2
+    };
+
+    const yoyo = {
+      x: canvas.width / 2,
+      y: 120,
+      vx: 0,
+      vy: 0,
+      angle: 0,
+      angularVelocity: 0, // 弧度/幀
+      radius: 28,
+      stringLength: 0,
+      woundLength: 0
+    };
+
+    function resetYoyo() {
+      state = 'HAND';
+      yoyo.x = hand.x;
+      yoyo.y = hand.y + 15;
+      yoyo.vx = 0;
+      yoyo.vy = 0;
+      yoyo.angularVelocity = 0;
+      yoyo.stringLength = 0;
+      updateUI();
+    }
+
+    function throwYoyo() {
+      if (state === 'HAND') {
+        state = 'UNWINDING';
+        yoyo.vy = throwPower;
+        yoyo.vx = (Math.random() - 0.5) * 2;
+        yoyo.angularVelocity = throwPower * 0.8;
+      }
+    }
+
+    function tugYoyo() {
+      // 輕扯繩子收球
+      if (state === 'SLEEPING') {
+        if (Math.abs(yoyo.angularVelocity) > 4 || isResponsive) {
+          state = 'WINDING_UP';
+          yoyo.vy = -Math.min(18, Math.abs(yoyo.angularVelocity) * 0.7);
+        }
+      }
+    }
+
+    // 控制綁定
+    document.getElementById('btn-throw').onclick = throwYoyo;
+    document.getElementById('btn-return').onclick = tugYoyo;
+    document.getElementById('btn-reset').onclick = resetYoyo;
+    document.getElementById('btn-cradle').onclick = () => {
+      if (state === 'SLEEPING') {
+        // 走狗技巧：稍微往前踢
+        yoyo.vx = 6;
+      }
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (state === 'HAND') throwYoyo();
+        else if (state === 'SLEEPING') tugYoyo();
+      } else if (e.code === 'KeyW' || e.code === 'ArrowUp') {
+        tugYoyo();
+      } else if (e.code === 'KeyR') {
+        resetYoyo();
+      } else if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+        hand.targetX -= 40;
+      } else if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+        hand.targetX += 40;
+      }
+    });
+
+    // 滑鼠拖動手部
+    let isDragging = false;
+    canvas.addEventListener('pointerdown', (e) => {
+      isDragging = true;
+      hand.targetX = e.clientX;
+    });
+    window.addEventListener('pointermove', (e) => {
+      if (isDragging) {
+        hand.targetX = e.clientX;
+      }
+    });
+    window.addEventListener('pointerup', () => isDragging = false);
+
+    // 監聽參數滑桿
+    frictionInput.oninput = (e) => friction = parseFloat(e.target.value);
+    forceInput.oninput = (e) => throwPower = parseFloat(e.target.value);
+    lengthInput.oninput = (e) => {
+      maxStringLength = parseInt(e.target.value) * 3.5;
+      document.getElementById('val-length').innerText = e.target.value;
+    };
+    responsiveInput.onchange = (e) => isResponsive = e.target.checked;
+
+    function updateUI() {
+      const rpm = Math.round(Math.abs(yoyo.angularVelocity) * 60 * 60 / (2 * Math.PI));
+      rpmText.innerText = rpm.toLocaleString();
+
+      let stateLabel = '';
+      if (state === 'HAND') stateLabel = '手中 (Ready)';
+      else if (state === 'UNWINDING') stateLabel = '下落展開 (Unwinding)';
+      else if (state === 'SLEEPING') stateLabel = '睡眠旋轉 (Sleeping)';
+      else if (state === 'WINDING_UP') stateLabel = '捲曲上升 (Returning)';
+
+      stateText.innerText = stateLabel;
+    }
+
+    // 物理主循環
+    function updatePhysics() {
+      // 手部平滑跟隨
+      hand.x += (hand.targetX - hand.x) * 0.15;
+
+      if (state === 'HAND') {
+        yoyo.x = hand.x;
+        yoyo.y = hand.y + 15;
+        yoyo.vx = 0;
+        yoyo.vy = 0;
+        yoyo.angularVelocity = 0;
+        return;
+      }
+
+      // 重力與阻尼
+      yoyo.vy += GRAVITY;
+      yoyo.x += yoyo.vx;
+      yoyo.y += yoyo.vy;
+      yoyo.angle += yoyo.angularVelocity;
+
+      // 角速度摩擦衰減 (軸承阻力)
+      yoyo.angularVelocity *= (1 - friction);
+      yoyo.vx *= 0.99; // 空氣橫向阻力
+
+      // 計算與手部的距離與角度
+      const dx = yoyo.x - hand.x;
+      const dy = yoyo.y - hand.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // 繩長極限拉緊約束
+      if (dist >= maxStringLength) {
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        // 投影速度至法線
+        const dot = yoyo.vx * nx + yoyo.vy * ny;
+
+        if (dot > 0) {
+          yoyo.vx -= dot * nx;
+          yoyo.vy -= dot * ny;
+        }
+
+        // 糾正位置防止穿透
+        yoyo.x = hand.x + nx * maxStringLength;
+        yoyo.y = hand.y + ny * maxStringLength;
+
+        // 當向下衝到底時轉為睡眠狀態
+        if (state === 'UNWINDING') {
+          state = 'SLEEPING';
+          // 觸底反彈微震感
+          yoyo.vy = -yoyo.vy * 0.2;
+        }
+      }
+
+      // 睡眠狀態下的走狗/碰地檢測
+      const floorY = canvas.height - 40;
+      if (yoyo.y + yoyo.radius > floorY) {
+        yoyo.y = floorY - yoyo.radius;
+        yoyo.vy = -yoyo.vy * 0.4;
+        // 地面摩擦讓球向前跑 (走狗特技)
+        yoyo.vx += yoyo.angularVelocity * 0.1;
+        yoyo.angularVelocity *= 0.97;
+      }
+
+      // 捲曲收回中
+      if (state === 'WINDING_UP') {
+        // 向手心靠攏
+        const toHandX = hand.x - yoyo.x;
+        const toHandY = hand.y - yoyo.y;
+        const distToHand = Math.sqrt(toHandX * toHandX + toHandY * toHandY);
+
+        yoyo.vx += (toHandX / distToHand) * 1.5;
+        yoyo.vy -= 1.2;
+
+        // 接住球
+        if (distToHand < 35) {
+          state = 'HAND';
+        }
+
+        // 如果旋轉耗盡但沒收回來，重新掉下去
+        if (Math.abs(yoyo.angularVelocity) < 0.5) {
+          state = 'UNWINDING';
+        }
+      }
+
+      // 旋轉停止墜落
+      if (state === 'SLEEPING' && Math.abs(yoyo.angularVelocity) < 0.2) {
+        yoyo.angularVelocity = 0;
+      }
+    }
+
+    // 繪圖函數
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 畫手部位置
+      ctx.fillStyle = '#94a3b8';
+      ctx.beginPath();
+      ctx.arc(hand.x, hand.y, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = '#475569';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(hand.x - 14, hand.y);
+      ctx.lineTo(hand.x + 14, hand.y);
+      ctx.stroke();
+
+      // 畫溜溜球細繩 (貝茲曲線微彎感)
+      ctx.save();
+      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.4)';
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      ctx.moveTo(hand.x, hand.y);
+      ctx.lineTo(yoyo.x, yoyo.y);
+      ctx.stroke();
+      ctx.restore();
+
+      // 畫溜溜球本體
+      ctx.save();
+      ctx.translate(yoyo.x, yoyo.y);
+      ctx.rotate(yoyo.angle);
+
+      // 外圈外殼
+      const grad = ctx.createRadialGradient(0, 0, 5, 0, 0, yoyo.radius);
+      grad.addColorStop(0, '#fb7185');
+      grad.addColorStop(0.7, '#e11d48');
+      grad.addColorStop(1, '#9f1239');
+
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, yoyo.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 邊緣高光
+      ctx.strokeStyle = '#fecdd3';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      // 內部花紋 / 輪輻 (呈現旋轉動態)
+      ctx.strokeStyle = '#fda4af';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.rotate(Math.PI / 2);
+        ctx.moveTo(8, 0);
+        ctx.lineTo(yoyo.radius - 4, 0);
+        ctx.stroke();
+
+        // 裝飾小圓點
+        ctx.fillStyle = '#ffe4e6';
+        ctx.beginPath();
+        ctx.arc(yoyo.radius * 0.6, 0, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 中心金屬軸心
+      ctx.fillStyle = '#cbd5e1';
+      ctx.beginPath();
+      ctx.arc(0, 0, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+
+      // 繪製地板線
+      const floorY = canvas.height - 40;
+      ctx.strokeStyle = '#334155';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, floorY);
+      ctx.lineTo(canvas.width, floorY);
+      ctx.stroke();
+    }
+
+    // 動畫迴圈
+    function loop() {
+      updatePhysics();
+      draw();
+      updateUI();
+      requestAnimationFrame(loop);
+    }
+
+    resetYoyo();
+    loop();
+  </script>
+</body>
+</html>
